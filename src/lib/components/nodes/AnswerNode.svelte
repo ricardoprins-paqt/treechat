@@ -83,6 +83,13 @@
 				{/each}
 			</div>
 		{/if}
+		<!--
+			linkedom (used to render this markdown to identical HTML during SSR)
+			encodes quote/apostrophe characters as HTML entities slightly
+			differently than a real browser DOM serializer does. The rendered
+			output is visually identical, so this mismatch is expected/harmless.
+		-->
+		<!-- svelte-ignore hydration_html_changed -->
 		{@html html}{#if status === 'streaming'}<span class="animate-pulse">▍</span>{/if}
 	</div>
 

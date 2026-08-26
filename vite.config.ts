@@ -4,6 +4,11 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+	server: {
+		// Bind to all interfaces (not just IPv6 loopback) so devcontainer/VS
+		// Code port forwarding, which connects via 127.0.0.1, can reach it.
+		host: true
+	},
 	plugins: [
 		tailwindcss(),
 		sveltekit({

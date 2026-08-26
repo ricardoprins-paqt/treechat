@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { SvelteFlow, Background, Controls, type Node, type Edge } from '@xyflow/svelte';
+	import { SvelteFlow, Background, Controls, MiniMap, type Node, type Edge } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 	import PromptNode from './nodes/PromptNode.svelte';
 	import AnswerNode from './nodes/AnswerNode.svelte';
@@ -253,6 +253,7 @@
 	<SvelteFlow bind:nodes bind:edges {nodeTypes} fitView nodesDraggable={false} panOnScroll>
 		<Background />
 		<Controls />
+		<MiniMap />
 	</SvelteFlow>
 
 	{#if conversationNodes.length === 0}

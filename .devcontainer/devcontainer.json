@@ -1,0 +1,50 @@
+{
+  "name": "AI Nodes",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:24-bookworm",
+
+  // One-time heavy installs: pnpm + a real Chromium for Playwright-based
+  // browser checks (so we don't need to install this on the host machine).
+  "postCreateCommand": "sudo npx playwright install --with-deps chromium",
+
+  // Install deps on each container start (fast, cached via the pnpm store volume).
+  "postStartCommand": "bash .devcontainer/post-start.sh",
+
+  "forwardPorts": [5173],
+  "portsAttributes": {
+    "5173": { "label": "AI Nodes (Vite Dev Server)" }
+  },
+
+  "features": {
+    "ghcr.io/devcontainers/features/copilot-cli:1": {}
+  },
+
+  "containerEnv": {
+    "DEVCONTAINER": "true",
+    "LANG": "en_US.UTF-8",
+    "SHELL": "/bin/bash"
+  },
+
+  "mounts": [
+    "type=volume,source=ai-nodes-pnpm-store,target=/home/node/.local/share/pnpm/store",
+    "type=volume,source=ai-nodes-copilot-config,target=/home/node/.config/github-copilot",
+    "type=volume,source=ai-nodes-copilot-home,target=/home/node/.copilot"
+  ],
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "svelte.svelte-vscode",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-vscode.vscode-typescript-next"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "eslint.validate": ["javascript", "typescript"]
+      }
+    }
+  },
+
+  "remoteUser": "node"
+}
