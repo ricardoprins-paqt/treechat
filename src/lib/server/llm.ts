@@ -5,18 +5,46 @@ const MODEL = env.LLM_MODEL ?? 'deepseek-ai/DeepSeek-V4-Flash-0731';
 const API_KEY = env.LLM_API_KEY ?? 'unused';
 
 export interface ChatMessage {
-	role: 'system' | 'user' | 'assistant';
+	role: 'system' | 'user' | 'assistant' | 'tool';
 	content: string;
+	/** Set on assistant messages that requested tool calls. */
+	tool_calls?: ToolCall[];
+	/** Set on tool-result messages, must match the originating tool_call's id. */
+	tool_call_id?: string;
+	/** Set on tool-result messages alongside tool_call_id. */
+	name?: string;
 }
+
+export interface ToolDefinition {
+	type: 'function';
+	function: {
+		name: string;
+		description: string;
+		parameters: Record<string, unknown>;
+	};
+}
+
+export interface ToolCall {
+	id: string;
+	type: 'function';
+	function: { name: string; arguments: string };
+}
+
+/** One chunk of a streamed chat completion: either text or a completed set of tool calls. */
+export type StreamEvent =
+	| { type: 'delta'; text: string }
+	| { type: 'tool_calls'; toolCalls: ToolCall[] };
 
 /**
  * Streams a chat completion from the internal vLLM OpenAI-compatible endpoint.
- * Yields incremental text chunks (deltas) as they arrive.
+ * Yields text deltas as they arrive, and a final `tool_calls` event if the
+ * model decided to call one or more tools instead of (or in addition to)
+ * producing text.
  */
 export async function* streamChatCompletion(
 	messages: ChatMessage[],
-	options?: { signal?: AbortSignal }
-): AsyncGenerator<string, void, unknown> {
+	options?: { signal?: AbortSignal; tools?: ToolDefinition[] }
+): AsyncGenerator<StreamEvent, void, unknown> {
 	const response = await fetch(`${BASE_URL}/chat/completions`, {
 		method: 'POST',
 		headers: {
@@ -26,7 +54,8 @@ export async function* streamChatCompletion(
 		body: JSON.stringify({
 			model: MODEL,
 			messages,
-			stream: true
+			stream: true,
+			...(options?.tools ? { tools: options.tools, tool_choice: 'auto' } : {})
 		}),
 		signal: options?.signal
 	});
@@ -39,6 +68,11 @@ export async function* streamChatCompletion(
 	const reader = response.body.getReader();
 	const decoder = new TextDecoder();
 	let buffer = '';
+
+	// Tool calls stream in as incremental deltas keyed by index: the name
+	// arrives once, then the arguments string arrives in fragments that must
+	// be concatenated in order.
+	const toolCallsByIndex = new Map<number, { id: string; name: string; arguments: string }>();
 
 	try {
 		while (true) {
@@ -55,12 +89,44 @@ export async function* streamChatCompletion(
 				if (!trimmed.startsWith('data:')) continue;
 
 				const payload = trimmed.slice('data:'.length).trim();
-				if (payload === '[DONE]') return;
+				if (payload === '[DONE]') {
+					if (toolCallsByIndex.size > 0) {
+						yield { type: 'tool_calls', toolCalls: finalizeToolCalls(toolCallsByIndex) };
+					}
+					return;
+				}
 
 				try {
 					const parsed = JSON.parse(payload);
-					const delta: string | undefined = parsed.choices?.[0]?.delta?.content;
-					if (delta) yield delta;
+					const choice = parsed.choices?.[0];
+					const delta = choice?.delta;
+
+					const text: string | undefined = delta?.content;
+					if (text) yield { type: 'delta', text };
+
+					const deltaToolCalls: Array<{
+						index: number;
+						id?: string;
+						function?: { name?: string; arguments?: string };
+					}> = delta?.tool_calls;
+					if (deltaToolCalls) {
+						for (const tc of deltaToolCalls) {
+							const existing = toolCallsByIndex.get(tc.index) ?? {
+								id: '',
+								name: '',
+								arguments: ''
+							};
+							if (tc.id) existing.id = tc.id;
+							if (tc.function?.name) existing.name += tc.function.name;
+							if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+							toolCallsByIndex.set(tc.index, existing);
+						}
+					}
+
+					if (choice?.finish_reason === 'tool_calls' && toolCallsByIndex.size > 0) {
+						yield { type: 'tool_calls', toolCalls: finalizeToolCalls(toolCallsByIndex) };
+						return;
+					}
 				} catch {
 					// Ignore malformed SSE chunks.
 				}
@@ -69,4 +135,16 @@ export async function* streamChatCompletion(
 	} finally {
 		reader.releaseLock();
 	}
+}
+
+function finalizeToolCalls(
+	byIndex: Map<number, { id: string; name: string; arguments: string }>
+): ToolCall[] {
+	return Array.from(byIndex.entries())
+		.sort(([a], [b]) => a - b)
+		.map(([, tc]) => ({
+			id: tc.id,
+			type: 'function' as const,
+			function: { name: tc.name, arguments: tc.arguments }
+		}));
 }

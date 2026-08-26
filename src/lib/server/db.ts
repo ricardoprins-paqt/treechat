@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import type { ConversationNode, NodeStatus, Role, Tree } from '$lib/types';
+import type { ConversationNode, NodeStatus, Role, ToolEvent, Tree } from '$lib/types';
 
 const DB_PATH = path.join(process.cwd(), 'data', 'ai-nodes.db');
 
@@ -24,6 +24,7 @@ db.exec(`
 		role TEXT NOT NULL CHECK (role IN ('prompt', 'answer')),
 		content TEXT NOT NULL DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'done' CHECK (status IN ('pending', 'streaming', 'done', 'error')),
+		tool_events TEXT NOT NULL DEFAULT '[]',
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	);
@@ -32,10 +33,24 @@ db.exec(`
 	CREATE INDEX IF NOT EXISTS idx_nodes_parent_id ON nodes(parent_id);
 `);
 
-export type { Role, NodeStatus, Tree, ConversationNode };
+// Migration for databases created before tool-call support was added.
+const nodeColumns = db.prepare('PRAGMA table_info(nodes)').all() as Array<{ name: string }>;
+if (!nodeColumns.some((c) => c.name === 'tool_events')) {
+	db.exec(`ALTER TABLE nodes ADD COLUMN tool_events TEXT NOT NULL DEFAULT '[]'`);
+}
+
+export type { Role, NodeStatus, Tree, ConversationNode, ToolEvent };
 
 function now(): string {
 	return new Date().toISOString();
+}
+
+/** Raw sqlite rows store tool_events as a JSON string column; parse it into the typed shape. */
+function deserializeNode(row: Record<string, unknown>): ConversationNode {
+	return {
+		...(row as unknown as ConversationNode),
+		tool_events: JSON.parse((row.tool_events as string) ?? '[]')
+	};
 }
 
 export function listTrees(): Tree[] {
@@ -66,13 +81,17 @@ export function touchTree(id: string): void {
 }
 
 export function getNodesForTree(treeId: string): ConversationNode[] {
-	return db
+	const rows = db
 		.prepare('SELECT * FROM nodes WHERE tree_id = ? ORDER BY created_at ASC')
-		.all(treeId) as ConversationNode[];
+		.all(treeId) as Record<string, unknown>[];
+	return rows.map(deserializeNode);
 }
 
 export function getNode(id: string): ConversationNode | undefined {
-	return db.prepare('SELECT * FROM nodes WHERE id = ?').get(id) as ConversationNode | undefined;
+	const row = db.prepare('SELECT * FROM nodes WHERE id = ?').get(id) as
+		| Record<string, unknown>
+		| undefined;
+	return row ? deserializeNode(row) : undefined;
 }
 
 export function createNode(params: {
@@ -89,15 +108,27 @@ export function createNode(params: {
 		role: params.role,
 		content: params.content ?? '',
 		status: params.status ?? 'done',
+		tool_events: [],
 		created_at: now(),
 		updated_at: now()
 	};
 	db.prepare(
-		`INSERT INTO nodes (id, tree_id, parent_id, role, content, status, created_at, updated_at)
-		 VALUES (@id, @tree_id, @parent_id, @role, @content, @status, @created_at, @updated_at)`
-	).run(node);
+		`INSERT INTO nodes (id, tree_id, parent_id, role, content, status, tool_events, created_at, updated_at)
+		 VALUES (@id, @tree_id, @parent_id, @role, @content, @status, @tool_events, @created_at, @updated_at)`
+	).run({ ...node, tool_events: JSON.stringify(node.tool_events) });
 	touchTree(params.treeId);
 	return node;
+}
+
+export function addToolEvent(id: string, event: ToolEvent): void {
+	const node = getNode(id);
+	if (!node) return;
+	const events = [...node.tool_events, event];
+	db.prepare('UPDATE nodes SET tool_events = ?, updated_at = ? WHERE id = ?').run(
+		JSON.stringify(events),
+		now(),
+		id
+	);
 }
 
 export function updateNodeContent(id: string, content: string, status?: NodeStatus): void {

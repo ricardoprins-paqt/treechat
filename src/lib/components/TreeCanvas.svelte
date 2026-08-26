@@ -71,6 +71,7 @@
 					? {
 							content: n.content,
 							status: n.status,
+							toolEvents: n.tool_events,
 							isLeaf: !parentIds.has(n.id),
 							onBranch: getBranchCallback(n.id),
 							onResize: getResizeCallback(n.id),
@@ -93,7 +94,9 @@
 			Math.round(a.position.y) === Math.round(b.position.y) &&
 			ad.content === bd.content &&
 			ad.status === bd.status &&
-			ad.isLeaf === bd.isLeaf
+			ad.isLeaf === bd.isLeaf &&
+			(ad.toolEvents as unknown[] | undefined)?.length ===
+				(bd.toolEvents as unknown[] | undefined)?.length
 		);
 	}
 
@@ -135,6 +138,15 @@
 		if (idx === -1) return;
 		const copy = conversationNodes.slice();
 		copy[idx] = { ...copy[idx], status };
+		conversationNodes = copy;
+		syncFlow();
+	}
+
+	function addToolEvent(id: string, event: { tool: string; input: string; summary?: string }) {
+		const idx = conversationNodes.findIndex((n) => n.id === id);
+		if (idx === -1) return;
+		const copy = conversationNodes.slice();
+		copy[idx] = { ...copy[idx], tool_events: [...copy[idx].tool_events, event] } as ConversationNode;
 		conversationNodes = copy;
 		syncFlow();
 	}
@@ -185,6 +197,12 @@
 						appendToNode(parsed.nodeId, parsed.delta);
 					} else if (eventName === 'done') {
 						setStatus(parsed.nodeId, 'done');
+					} else if (eventName === 'tool_result') {
+						addToolEvent(parsed.nodeId, {
+							tool: parsed.tool,
+							input: parsed.input,
+							summary: parsed.summary
+						});
 					} else if (eventName === 'error') {
 						setStatus(parsed.nodeId, 'error');
 						error = parsed.message;

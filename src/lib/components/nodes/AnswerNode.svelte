@@ -19,6 +19,9 @@
 	const content = $derived(data.content as string);
 	const onBranch = $derived(data.onBranch as (prompt: string) => void);
 	const html = $derived(renderMarkdown(content));
+	const toolEvents = $derived(
+		(data.toolEvents as Array<{ tool: string; input: string; summary?: string }>) ?? []
+	);
 
 	// Once this node gains a child (someone continued/branched from it), fall
 	// back to the collapsed "Branch" toggle instead of keeping the box open.
@@ -64,6 +67,22 @@
 	</div>
 
 	<div class="prose prose-sm dark:prose-invert max-w-none break-words">
+		{#if toolEvents.length > 0}
+			<div class="not-prose mb-2 flex flex-col gap-1">
+				{#each toolEvents as evt, i (i)}
+					<div
+						class="flex items-center gap-1.5 rounded bg-emerald-100/70 px-2 py-1 text-xs text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300"
+					>
+						<span>{evt.tool === 'web_search' ? '🔍' : '📄'}</span>
+						<span class="font-medium">{evt.tool === 'web_search' ? 'Searched' : 'Read'}:</span>
+						<span class="truncate">{evt.input}</span>
+						{#if evt.summary}
+							<span class="text-emerald-500 dark:text-emerald-500">— {evt.summary}</span>
+						{/if}
+					</div>
+				{/each}
+			</div>
+		{/if}
 		{@html html}{#if status === 'streaming'}<span class="animate-pulse">▍</span>{/if}
 	</div>
 
