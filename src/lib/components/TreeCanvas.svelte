@@ -250,7 +250,7 @@
 </script>
 
 <div class="relative h-full w-full">
-	<SvelteFlow bind:nodes bind:edges {nodeTypes} fitView nodesDraggable={false}>
+	<SvelteFlow bind:nodes bind:edges {nodeTypes} fitView nodesDraggable={false} panOnScroll>
 		<Background />
 		<Controls />
 	</SvelteFlow>
