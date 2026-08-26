@@ -37,6 +37,23 @@
 		return cb;
 	}
 
+	// Editing a prompt creates a sibling prompt (same parent) with the new
+	// text instead of touching the original - the old thread stays intact as
+	// its own branch alongside the edited one.
+	const editCallbacks = new Map<string, (prompt: string) => void>();
+	function getEditCallback(id: string) {
+		let cb = editCallbacks.get(id);
+		if (!cb) {
+			cb = (prompt: string) => {
+				const node = conversationNodes.find((n) => n.id === id);
+				if (!node) return;
+				sendPrompt(node.parent_id, prompt);
+			};
+			editCallbacks.set(id, cb);
+		}
+		return cb;
+	}
+
 	const resizeCallbacks = new Map<string, (height: number) => void>();
 	function getResizeCallback(id: string) {
 		let cb = resizeCallbacks.get(id);
@@ -79,6 +96,7 @@
 						}
 					: {
 							content: n.content,
+							onEdit: getEditCallback(n.id),
 							onResize: getResizeCallback(n.id),
 							measuredHeight: measuredHeights[n.id]
 						}
