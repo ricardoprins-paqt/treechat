@@ -12,6 +12,7 @@
 	let rootPrompt = $state('');
 	let sending = $state(false);
 	let error = $state<string | null>(null);
+	let activeAbort: AbortController | null = null;
 	let measuredHeights: Record<string, number> = {};
 
 	// SvelteFlow recommends `$state.raw` + `bind:` for its nodes/edges so it
@@ -175,11 +176,15 @@
 	async function sendPrompt(parentId: string | null, prompt: string) {
 		error = null;
 		sending = true;
+		const abortController = new AbortController();
+		activeAbort = abortController;
+		let answerNodeId: string | null = null;
 		try {
 			const res = await fetch(`/api/trees/${treeId}/messages`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ parentId, prompt })
+				body: JSON.stringify({ parentId, prompt }),
+				signal: abortController.signal
 			});
 			if (!res.ok || !res.body) {
 				throw new Error(`Request failed (${res.status})`);
@@ -209,6 +214,7 @@
 					const parsed = JSON.parse(data);
 
 					if (eventName === 'init') {
+						answerNodeId = parsed.answerNode.id;
 						upsertNode(parsed.promptNode);
 						upsertNode(parsed.answerNode);
 					} else if (eventName === 'delta') {
@@ -228,10 +234,21 @@
 				}
 			}
 		} catch (err) {
-			error = err instanceof Error ? err.message : String(err);
+			if (err instanceof DOMException && err.name === 'AbortError') {
+				// User-initiated stop, not a real error - just mark the answer done
+				// where it left off.
+				if (answerNodeId) setStatus(answerNodeId, 'done');
+			} else {
+				error = err instanceof Error ? err.message : String(err);
+			}
 		} finally {
 			sending = false;
+			activeAbort = null;
 		}
+	}
+
+	function stopGenerating() {
+		activeAbort?.abort();
 	}
 
 	function submitRoot() {
@@ -275,6 +292,17 @@
 					Send
 				</button>
 			</div>
+		</div>
+	{/if}
+
+	{#if sending}
+		<div class="absolute top-4 right-4">
+			<button
+				onclick={stopGenerating}
+				class="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white shadow hover:bg-red-700"
+			>
+				Stop generating
+			</button>
 		</div>
 	{/if}
 
